@@ -165,7 +165,10 @@ class DependencyGraph(object):
                                         cairo.FONT_SLANT_NORMAL,
                                         cairo.FONT_WEIGHT_NORMAL)
         self.context.set_font_size(self.font_size)
-        self.context.move_to(self.padding_left, self.height-10)
+        if self.show_tags:
+            self.context.move_to(self.padding_left, self.height - self.tags_height - 10)
+        else:
+            self.context.move_to(self.padding_left, self.height-10)
         self.context.set_source_rgb(0, 0, 0)
 
         spacing = ' ' * self.word_spacing
@@ -319,7 +322,10 @@ class DependencyGraph(object):
 
         # coordinates of the center of the arc
         x = self.padding_left + start + 3
-        y = self.height - self.arc_base_height
+        if self.show_tags:
+            y = self.height - self.arc_base_height - self.tags_height
+        else:
+            y = self.height - self.arc_base_height
         xc = x + self.radius
         yc = y - (20 * relation.distance)
 
@@ -414,7 +420,7 @@ def main():
     for sentence in read_input(sys.stdin):
         graph = DependencyGraph(sentence)
         graph.draw()
-        graph.save_png(sentence.id + "-new.png")
+        graph.save_png(sentence.id + ".png")
 
 
 if __name__ == "__main__":
