@@ -100,7 +100,7 @@ class DependencyGraph(object):
         self.sentence = sentence
         self.show_tags = show_tags
         self.word_spacing = word_spacing
-        self.forms = [token.form for token in sentence.tokens]
+        self.forms = [token.form for token in sentence]
         self.relations = self.get_relations()
         # the relation height is used to define the arc height,
         # an arc from two neighbor words just needs a 1 relation height
@@ -130,7 +130,7 @@ class DependencyGraph(object):
         # number of total letters in sentence
         # this is used to count the space of each letter and thus
         # allowing to pin point where to start to draw an arc
-        nletters = sum([len(token.form) for token in self.sentence.tokens])
+        nletters = sum([len(token.form) for token in self.sentence])
 
         # the width of the canvas is the relation of all the letters in the
         # sentence, words spacing and the letter_width that seems to translate
@@ -244,7 +244,7 @@ class DependencyGraph(object):
             # for each word, retrieves the tags to write
             # writes the tags from bottom to up
             x = self.padding_left
-            for t in self.sentence.tokens:
+            for t in self.sentence:
                 # reset height of bottom tag
                 y = self.height - 10
                 for field in [t.phead, t.feats, t.lemma, t.cpostag]:
@@ -390,7 +390,7 @@ class DependencyGraph(object):
         Create a list of relations (arcs)
         """
         relations = [
-            Relation(token) for token in self.sentence.tokens
+            Relation(token) for token in self.sentence
             if token.deprel != "ROOT"
         ]
 
