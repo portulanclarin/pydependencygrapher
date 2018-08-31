@@ -144,7 +144,7 @@ class DependencyGraph(object):
 
         if self.show_tags:
             # adds height space to write the tags
-            self.tags_number = 4
+            self.tags_number = 3
             self.tags_height = self.tags_number * 20
             self.height = self.height + self.tags_height
 
@@ -247,7 +247,7 @@ class DependencyGraph(object):
             for t in self.sentence:
                 # reset height of bottom tag
                 y = self.height - 10
-                for field in [t.phead, t.feats, t.lemma, t.cpostag]:
+                for field in [t.feats, t.lemma, t.cpostag]:
 
                     # writes tag
                     self.context.move_to(x, y)

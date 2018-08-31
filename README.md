@@ -20,11 +20,7 @@ Draws dependency graphs from a modified CONLL input
 
 ### Output:
 
-![dependency graph](https://raw.githubusercontent.com/joaoantonioverdade/pydependencygrapher/master/example.png)
-
-and with extra tags:
-
-![dependency graph with tags](https://raw.githubusercontent.com/joaoantonioverdade/pydependencygrapher/master/example_tagged.png)
+![dependency graph with tags](https://raw.githubusercontent.com/joaoantonioverdade/pydependencygrapher/master/example.png)
 
 
 
