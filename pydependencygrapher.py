@@ -1,40 +1,49 @@
-#!/usr/bin/python3.4
-# -*- coding: utf-8 -*-
-
 """
 Draws a dependency graph from a modified CONLL input
 
 Author: João A. Rodrigues (joao.rodrigues@di.fc.ul.pt)
 Date: 8 April 2015
-
-Version: 0.91
 """
 
-import sys
-import signal
+__version__ = "1.0.0"
+
 import cairo
 import collections
 
 
-class DependencyGraph():
-    pass
+# defines a named-tuple for the CONLL tokens
+Token = collections.namedtuple(
+    'Token', 'id form lemma cpostag postag feats head deprel phead pdeprel'
+)
+
+class Relation(object):
+    def __init__(self, token):
+        self.origin = int(token.head)
+        self.annotation = token.deprel
+        # the relation is always from left to right words
+        self.word_start = min(int(token.id), self.origin)
+        self.word_end = max(int(token.id), self.origin)
+        self.distance = self.word_end - self.word_start
 
 
-class Relation():
-    pass
+Sentence = collections.namedtuple('Sentence', 'id raw tokens')
 
 
-class Canvas():
-    pass
+def make_sentence(lines):
+    return Sentence(
+        id=lines[0].lstrip("#"),
+        raw=lines[1].lstrip("Sentence:"),
+        tokens=[Token(*line.split('\t')) for line in lines[2:]],
+    )
 
 
-def read_input():
+def read_input(inputfile):
     """
-    Reads the stdin buffer assuming a pipeline
+    Reads sentences from stdin
 
     The input must be in the following modified CONLL format, ex.:
 
-    #index (also the name it will store the resulting image)
+    #sentence_id
     Sentence: Maria Vitória tem razão .
     1   Maria   MARIA   PNM PNM _       3   SJ-ARG1 _   _
     2   Vitória VITÓRIA PNM PNM _       1   N       _   _
@@ -42,440 +51,371 @@ def read_input():
     4   razão   RAZÃO   CN  CN  gs      3   DO-ARG2 _   _
     5   .       .       PNT PNT _       3   PUNCT   _   _
 
+
+    An empty line ends the sentence.
+    The sentence_id is used as the basename of the resulting image file.
+    The initial hash (#) is stripped from sentence_id.
+    The second line (containing the sentence) is ignored.
+    Each token line must contain 10 tab-separated columns:
+        1. token id
+        2. form
+        3. lemma
+        4. cpostag
+        5. postag
+        6. feats
+        7. head
+        8. deprel
+        9. phead
+        10. pdeprel
+
     """
-
-    sentence = []
-
-    for line in sys.stdin:
-        line = line.rstrip('\n')
-
-        # processes a complete sentence stored in the list
-        if len(line) == 0:
-            generate_graph(sentence)
-            sentence.clear()
+    lines = []
+    for line in inputfile:
+        line = line.rstrip()
+        if line:
+            lines.append(line)
         else:
-            sentence.append(line.split('\t'))
+            if len(lines) >= 3:
+                yield make_sentence(lines)
+            lines = []
+    if len(lines) >= 3:
+        yield make_sentence(lines)
 
-    # ended without a newline but has some sentence in buffer
-    if sentence:
-        generate_graph(sentence)
 
-
-def generate_graph(sentence):
+class DependencyGraph(object):
     """
     Generates the graph data representation for the dependencies
     """
 
-    graph = DependencyGraph()
+    def __init__(
+                self,
+                sentence, 
+                show_tags=True,
+                word_spacing=6,
+                font_size=12,
+                letter_width=7,
+                font_annotation_size=10,
+                arc_base_height=15,
+                bheight=10,
+                radius=15,
+                padding_left=10,
+            ):
+        self.sentence = sentence
+        self.show_tags = show_tags
+        self.word_spacing = word_spacing
+        self.forms = [token.form for token in sentence.tokens]
+        self.relations = self.get_relations()
+        # the relation height is used to define the arc height,
+        # an arc from two neighbor words just needs a 1 relation height
+        # an arc from a two word distance needs a 2 relation height...
+        # the maximum value from all relations will set the maximum height
+        # necessary for the canvas
+        self.max_relation_height = max([r.distance for r in self.relations])
+        self.font_size = font_size
+        self.letter_width = letter_width
+        self.font_annotation_size = font_annotation_size
+        self.arc_base_height = arc_base_height
+        self.bheight = bheight
+        self.radius = radius
+        self.padding_left = padding_left
+        self.surface = None
 
-    # show extra tags?
-    graph.show_tags = True
+    def draw(self):
+        """
+        Draws the main canvas and relations of the dependencies
 
-    # extracts index, makes it an attribute and removes from sentence list
-    graph.id = str(sentence.pop(0)[0])[1:]
+        Uses the 2D graphics library Cairo: http://cairographics.org/download/
+        with the Python bindings: http://cairographics.org/pycairo/
+        """
 
-    # ignores and removes the sentence line
-    sentence.pop(0)
+        ntokens = len(self.forms)
+        
+        # number of total letters in sentence
+        # this is used to count the space of each letter and thus
+        # allowing to pin point where to start to draw an arc
+        nletters = sum([len(token.form) for token in self.sentence.tokens])
 
-    if(graph.show_tags):
-        graph.tags = generate_tags(sentence)
+        # the width of the canvas is the relation of all the letters in the
+        # sentence, words spacing and the letter_width that seems to translate
+        # a letter width to the canvas
 
-    # defines the space between words
-    graph.word_spacing = 6
+        self.width = ((ntokens * self.word_spacing) + nletters) * self.letter_width
 
-    # extracts word-form sentence
-    graph.sentence = [entry[1] for entry in sentence]
+        # the height of the canvas is: the combination of the highest relation
+        # height, the radius of the arc curve and the default arc height
+        self.height = self.arc_base_height + self.bheight + self.radius + (self.max_relation_height * 20)
 
-    # handles all the relations of dependency
-    graph.relations = generate_relations(sentence)
+        if self.show_tags:
+            # adds height space to write the tags
+            self.tags_number = 4
+            self.tags_height = self.tags_number * 20
+            self.height = self.height + self.tags_height
 
-    # number of words
-    graph.words = len(graph.sentence)
-
-    # number of total letters in sentence
-    # this is used to count the space of each letter and thus
-    # allowing to pin point where to start to draw an arc
-    graph.letters = sum([len(word) for word in graph.sentence])
-
-    # the relation height is used to define the arc height,
-    # an arc from two neighbor words just needs a 1 relation height
-    # an arc from a two word distance needs a 2 relation height...
-    # the maximum value from all relations will set the maximum height
-    # necessary for the canvas
-    graph.max_relation_height = max([r.distance for r in graph.relations])
-
-    draw(graph)
-
-
-def draw(graph):
-    """
-    Draws the main canvas and relations of the dependencies
-
-    Uses the 2D graphics library Cairo: http://cairographics.org/download/
-    with the Python bindings: http://cairographics.org/pycairo/
-    """
-    canvas = Canvas()
-
-    # if you really must change something, change it carefully!!!
-    canvas.font_size = 12
-    canvas.letter_width = 7
-    canvas.font_annotation_size = 10
-    canvas.arc_base_height = 15
-    canvas.bheight = 10
-    canvas.radius = 15
-    canvas.padding_left = 10
-
-    # the width of the canvas is the relation of all the letters in the
-    # sentence, words spacing and the letter_width that seems to translate
-    # a letter width to the canvas
-    canvas.width = ((graph.words * graph.word_spacing) + graph.letters) * \
-        canvas.letter_width
-
-    # the height of the canvas is: the combination of the highest relation
-    # height, the radius of the arc curve and the default arc height
-    canvas.height = canvas.arc_base_height + \
-        canvas.bheight + \
-        canvas.radius + \
-        (graph.max_relation_height * 20)
-
-    # access to the draw canvas
-    canvas.surface = cairo.ImageSurface(cairo.FORMAT_ARGB32,
-                                        canvas.width,
-                                        canvas.height)
-    canvas.context = cairo.Context(canvas.surface)
-
-    # background color draw as a white rectangle
-    canvas.context.set_source_rgb(1.0, 1.0, 1.0)
-    canvas.context.rectangle(0, 0, canvas.width, canvas.height)
-    canvas.context.fill()
-
-    # writes the sentence taking into account a word spacing
-    canvas.context.select_font_face('monospace',
-                                    cairo.FONT_SLANT_NORMAL,
-                                    cairo.FONT_WEIGHT_NORMAL)
-    canvas.context.set_font_size(canvas.font_size)
-    canvas.context.move_to(canvas.padding_left, canvas.height-10)
-    canvas.context.set_source_rgb(0, 0, 0)
-
-    spacing = ' ' * graph.word_spacing
-    canvas.context.show_text(spacing.join(graph.sentence))
-    canvas.context.stroke()
-
-    # extracts the relations between the words of the sentence ex.:
-    # [(A, B), (1, 2), (3, 4), (3, 5)]
-    # word A has a relation to word B
-    links = [(r.word_start, r.word_end) for r in graph.relations]
-
-    # for each word in the sentence it will generate the necessary information
-    # for drawing the arcs that spawn from it
-    # it starts from the left of the sentence and draws all the arcs to
-    # subsequent words, it does NOT draw from father/head to child, it draws
-    # from the first word from the left to the word to its right
-    for idx, word in enumerate(graph.sentence):
-
-        # searches for relations that start from the current word
-        for relation in graph.relations:
-            if relation.word_start == idx + 1:
-
-                # relations on the starting and ending word
-                relation.relations_start = 0
-                relation.relations_end = 0
-
-                # stores the relations that come from the
-                # LEFT and RIGHT to the STARTing or ENDing word of an arc:
-                #
-                #                              START RIGHT Relations
-                #                 _____________________________
-                # START LEFT     /_______________________       \
-                #  _________    // ______________        \       \
-                #           \  || /              \        \       \
-                #           |  |||               |        |       |
-                #         WORD_START (A)      WORD_END   WORD (B)  WORD (C)
-                #
-                #
-                # ex.: relations_start_right = [(A, B), (A, C)]
-                # this means that in the current word A there are two
-                # relations to two words at its right, the B and C words
-                relation.relations_start_left = []
-                relation.relations_start_right = []
-                relation.relations_end_left = []
-
-                for (start, end) in links:
-
-                    if relation.word_start in [start, end]:
-                        relation.relations_start += 1
-
-                    if relation.word_end in [start, end]:
-                        relation.relations_end += 1
-
-                    if relation.word_start == start:
-                        relation.relations_start_right.append((start, end))
-
-                    if relation.word_start == end:
-                        relation.relations_start_left.append((start, end))
-
-                for (start, end) in links:
-                    for (_, end_right) in relation.relations_start_right:
-                        if end == end_right:
-                            relation.relations_end_left.append((start, end))
-
-                draw_arc(graph, canvas, relation)
-
-    # stores the image resource
-    canvas.surface.write_to_png(graph.id + ".png")
-
-    if graph.show_tags:
-
-        # adds height space to write the tags
-        tags_number = 4
-        canvas.tags_height = tags_number * 20
-        canvas.height = canvas.height + canvas.tags_height
-
-        # copies the content of the previous image
-        new_canvas = Canvas()
-        new_canvas.surface = cairo.ImageSurface(cairo.FORMAT_ARGB32,
-                                                canvas.width,
-                                                canvas.height)
-
-        new_canvas.context = cairo.Context(new_canvas.surface)
-        new_canvas.context.set_source_surface(canvas.surface, 0, 0)
-        new_canvas.context.paint()
-
-        canvas.surface = new_canvas.surface
-        canvas.context = new_canvas.context
+        # access to the draw canvas
+        self.surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, self.width, self.height)
+        self.context = cairo.Context(self.surface)
 
         # background color draw as a white rectangle
-        canvas.context.set_source_rgb(1.0, 1.0, 1.0)
-        canvas.context.rectangle(0, canvas.height - canvas.tags_height,
-                                 canvas.width, canvas.height)
-        canvas.context.fill()
+        self.context.set_source_rgb(1.0, 1.0, 1.0)
+        self.context.rectangle(0, 0, self.width, self.height)
+        self.context.fill()
 
-        # prepares the text stroke as grey
-        canvas.context.select_font_face('monospace',
+        # writes the sentence taking into account a word spacing
+        self.context.select_font_face('monospace',
                                         cairo.FONT_SLANT_NORMAL,
                                         cairo.FONT_WEIGHT_NORMAL)
-        canvas.context.set_font_size(canvas.font_size)
-        canvas.context.set_source_rgb(0.7, 0.7, 0.7)
+        self.context.set_font_size(self.font_size)
+        self.context.move_to(self.padding_left, self.height-10)
+        self.context.set_source_rgb(0, 0, 0)
 
-        # for each word, retrieves the tags to write
-        # writes the tags from bottom to up
-        tag_show = []
-        x = canvas.padding_left
-        for idx, word_tag in enumerate(graph.tags):
+        spacing = ' ' * self.word_spacing
+        self.context.show_text(spacing.join(self.forms))
+        self.context.stroke()
 
-            tag_show.clear()
-            tag_show.append(word_tag.phead)
-            tag_show.append(word_tag.feats)
-            tag_show.append(word_tag.lemma)
-            tag_show.append(word_tag.cpostag)
+        # extracts the relations between the words of the sentence ex.:
+        # [(A, B), (1, 2), (3, 4), (3, 5)]
+        # word A has a relation to word B
+        links = [(r.word_start, r.word_end) for r in self.relations]
 
-            # reset height of bottom tag
-            y = canvas.height - 10
+        # for each word in the sentence it will generate the necessary information
+        # for drawing the arcs that spawn from it
+        # it starts from the left of the sentence and draws all the arcs to
+        # subsequent words, it does NOT draw from father/head to child, it draws
+        # from the first word from the left to the word to its right
+        for idx, word in enumerate(self.forms):
 
-            for field in tag_show:
+            # searches for relations that start from the current word
+            for relation in self.relations:
+                if relation.word_start == idx + 1:
 
-                # writes tag
-                canvas.context.move_to(x, y)
-                canvas.context.show_text(field)
-                canvas.context.stroke()
+                    # relations on the starting and ending word
+                    relation.relations_start = 0
+                    relation.relations_end = 0
 
-                y -= 20
+                    # stores the relations that come from the
+                    # LEFT and RIGHT to the STARTing or ENDing word of an arc:
+                    #
+                    #                              START RIGHT Relations
+                    #                 _____________________________
+                    # START LEFT     /_______________________       \
+                    #  _________    // ______________        \       \
+                    #           \  || /              \        \       \
+                    #           |  |||               |        |       |
+                    #         WORD_START (A)      WORD_END   WORD (B)  WORD (C)
+                    #
+                    #
+                    # ex.: relations_start_right = [(A, B), (A, C)]
+                    # this means that in the current word A there are two
+                    # relations to two words at its right, the B and C words
+                    relation.relations_start_left = []
+                    relation.relations_start_right = []
+                    relation.relations_end_left = []
 
-            # moves the x coordinate to the same x has the next word
-            x += (len(graph.sentence[idx]) + graph.word_spacing) * \
-                canvas.letter_width
+                    for (start, end) in links:
 
-        new_canvas.surface.write_to_png(graph.id + "_tagged.png")
+                        if relation.word_start in [start, end]:
+                            relation.relations_start += 1
 
+                        if relation.word_end in [start, end]:
+                            relation.relations_end += 1
 
-def draw_arc(graph, canvas, relation):
-    """
-    Draws an arc with annotation and an arrow to signal direction
-    """
+                        if relation.word_start == start:
+                            relation.relations_start_right.append((start, end))
 
-    arrow_length = 3
-    canvas.context.set_line_width(1.2)
+                        if relation.word_start == end:
+                            relation.relations_start_left.append((start, end))
 
-    # for simplification
-    word_start = relation.word_start
-    word_end = relation.word_end
-    word_spacing = graph.word_spacing
+                    for (start, end) in links:
+                        for (_, end_right) in relation.relations_start_right:
+                            if end == end_right:
+                                relation.relations_end_left.append((start, end))
 
-    relations_start = relation.relations_start
-    relations_end = relation.relations_end
+                    self.draw_arc(relation)
 
-    # calculates the space from left to the first and last word
-    letters = sum([len(w) for w in graph.sentence[:word_start - 1]])
-    start = (((word_start - 1) * word_spacing) + letters) * canvas.letter_width
+        if self.show_tags:
 
-    letters = sum([len(w) for w in graph.sentence[:word_end - 1]])
-    end = (((word_end - 1) * word_spacing) + letters) * canvas.letter_width
+            # prepares the text stroke as grey
+            self.context.select_font_face('monospace',
+                                            cairo.FONT_SLANT_NORMAL,
+                                            cairo.FONT_WEIGHT_NORMAL)
+            self.context.set_font_size(self.font_size)
+            self.context.set_source_rgb(0.7, 0.7, 0.7)
 
-    # the slot represents the arcs entries and exit's a word can have
-    # the starting slot always takes into account previous arcs that may
-    # have ended in the slot's word (always at its left)
-    start_slot = len(relation.relations_start_left)
+            # for each word, retrieves the tags to write
+            # writes the tags from bottom to up
+            x = self.padding_left
+            for t in self.sentence.tokens:
+                # reset height of bottom tag
+                y = self.height - 10
+                for field in [t.phead, t.feats, t.lemma, t.cpostag]:
 
-    # indexes all the relations from the starting word to words at its right
-    # compares the current relation with the index list and finds the best
-    # suitable slot, this is, a slot that will allow to draw an arc taking
-    # into account its distance to the ending word and thus defining its
-    # correctly height so it doesn't intersect other arcs
-    ends = sorted([e for (_, e) in relation.relations_start_right])
-    for idx, target in enumerate(ends):
-        if target == relation.word_end:
-            start_slot += len(relation.relations_start_right) - idx - 1
-            break
+                    # writes tag
+                    self.context.move_to(x, y)
+                    self.context.show_text(field)
+                    self.context.stroke()
 
-    end_slot = 0
+                    y -= 20
 
-    # same as previous but for the ending word slot
-    starts = sorted([s for (s, e) in relation.relations_end_left
-                     if e == relation.word_end])
-    for idx, source in enumerate(starts):
-        if source == relation.word_start:
-            end_slot += len(starts) - idx - 1
-            break
-
-    # counts space of the start and end word
-    total_start = len(graph.sentence[word_start - 1]) * canvas.letter_width
-    total_end = len(graph.sentence[word_end - 1]) * canvas.letter_width
-
-    # divides the total space given to the word for each slot
-    start += (total_start // (relations_start + 1)) * (start_slot + 1) - 1
-    end += (total_end // (relations_end + 1)) * (end_slot + 1) - 3
-
-    # coordinates of the center of the arc
-    x = canvas.padding_left + start + 3
-    y = canvas.height - canvas.arc_base_height
-    xc = x + canvas.radius
-    yc = y - (20 * relation.distance)
-
-    # draws the arrow at the end word
-    if(relation.origin == relation.word_end):
-        canvas.context.move_to(xc - canvas.radius - arrow_length,
-                               y - arrow_length - canvas.bheight)
-        canvas.context.line_to(xc - canvas.radius, y - canvas.bheight)
-        canvas.context.line_to(xc - canvas.radius + arrow_length,
-                               y - arrow_length - canvas.bheight)
-        canvas.context.stroke()
-
-    # draws line from the starting word to its arc
-    canvas.context.move_to(x, y - canvas.bheight)
-    canvas.context.line_to(x, yc)
-    canvas.context.stroke()
-
-    # draws the arc of the starting word
-    angle1 = 3.14
-    angle2 = -1.57
-    canvas.context.arc(xc, yc, canvas.radius, angle1, angle2)
-
-    # puts the x coordinate in the center of the ending word
-    # note that there is NOT a context.stroke() between the drawing of the
-    # arcs, this is done on purpose so a line from the first arc is draw to
-    # the second arc
-    xc = end
-
-    # draws the arc of the ending word
-    angle1 = -1.57
-    angle2 = 0
-    canvas.context.arc(xc, yc, canvas.radius, angle1, angle2)
-    canvas.context.stroke()
-
-    # draws line from the second arc to the ending word
-    canvas.context.move_to(xc + canvas.radius, y - canvas.bheight)
-    canvas.context.line_to(xc + canvas.radius, yc)
-    canvas.context.stroke()
-
-    # draws the arrow at the end
-    if(relation.origin == relation.word_start):
-        canvas.context.move_to(xc + canvas.radius - arrow_length,
-                               y - arrow_length - canvas.bheight)
-        canvas.context.line_to(xc + canvas.radius, y - canvas.bheight)
-        canvas.context.line_to(xc + canvas.radius + arrow_length,
-                               y - arrow_length - canvas.bheight)
-        canvas.context.stroke()
-
-    # draws the annotation centered
-    canvas.context.set_font_size(canvas.font_annotation_size)
-    c = (x + canvas.radius) + ((xc - (x + canvas.radius)) / 2)
-    c = c - ((len(relation.annotation) / 2) * canvas.letter_width) + 3
-    canvas.context.move_to(c,  yc - 5)
-    canvas.context.show_text(relation.annotation.upper())
-    canvas.context.stroke()
+                # moves the x coordinate to the same x has the next word
+                x += (len(t.form) + self.word_spacing) * self.letter_width
 
 
-def generate_relations(sentence):
-    """
-    Create a list of relations (arcs)
-    """
-    relation = Relation()
-    relations = []
+    def draw_arc(self, relation):
+        """
+        Draws an arc with annotation and an arrow to signal direction
+        """
 
-    # removes the root relation from the sentence
-    sentence = [entry for entry in sentence if entry[7] != 'ROOT']
+        arrow_length = 3
+        self.context.set_line_width(1.2)
 
-    # at this point each CONLL entry must be a relation
-    for entry in sentence:
+        # for simplification
+        word_start = relation.word_start
+        word_end = relation.word_end
+        word_spacing = self.word_spacing
 
-        id_str = int(entry[0])
-        head = int(entry[6])
-        deprel = entry[7]
+        relations_start = relation.relations_start
+        relations_end = relation.relations_end
 
-        relation = Relation()
-        relation.annotation = deprel
+        # calculates the space from left to the first and last word
+        letters = sum([len(w) for w in self.forms[:word_start - 1]])
+        start = (((word_start - 1) * word_spacing) + letters) * self.letter_width
 
-        # marks the origin so the arrow can be draw to signal direction
-        relation.origin = head
+        letters = sum([len(w) for w in self.forms[:word_end - 1]])
+        end = (((word_end - 1) * word_spacing) + letters) * self.letter_width
 
-        # the relation is always from left to right words
-        word_min = min(id_str, head)
-        word_max = max(id_str, head)
-        relation.distance = word_max - word_min
+        # the slot represents the arcs entries and exit's a word can have
+        # the starting slot always takes into account previous arcs that may
+        # have ended in the slot's word (always at its left)
+        start_slot = len(relation.relations_start_left)
 
-        relation.word_start = word_min
-        relation.word_end = word_max
+        # indexes all the relations from the starting word to words at its right
+        # compares the current relation with the index list and finds the best
+        # suitable slot, this is, a slot that will allow to draw an arc taking
+        # into account its distance to the ending word and thus defining its
+        # correctly height so it doesn't intersect other arcs
+        ends = sorted([e for (_, e) in relation.relations_start_right])
+        for idx, target in enumerate(ends):
+            if target == relation.word_end:
+                start_slot += len(relation.relations_start_right) - idx - 1
+                break
 
-        relations.append(relation)
+        end_slot = 0
 
-    # defines the distance of the arc, which influence the height of the arc,
-    # from smallest distance relation to highest
-    relations = sorted(relations, key=lambda r: r.distance)
-    for relation in relations:
-        distances = []
-        # stores all word distances and counts the uniques
-        # this value plus one is the maximum height of the
-        # arc needed to represent the actual relation
-        for sub_relation in relations:
+        # same as previous but for the ending word slot
+        starts = sorted([s for (s, e) in relation.relations_end_left
+                        if e == relation.word_end])
+        for idx, source in enumerate(starts):
+            if source == relation.word_start:
+                end_slot += len(starts) - idx - 1
+                break
 
-            if relation != sub_relation:
-                if sub_relation.word_start >= relation.word_start:
-                    if sub_relation.word_end <= relation.word_end:
-                        distances.append(sub_relation.distance)
+        # counts space of the start and end word
+        total_start = len(self.forms[word_start - 1]) * self.letter_width
+        total_end = len(self.forms[word_end - 1]) * self.letter_width
 
-        relation.distance = len(set(distances)) + 1
+        # divides the total space given to the word for each slot
+        start += (total_start // (relations_start + 1)) * (start_slot + 1) - 1
+        end += (total_end // (relations_end + 1)) * (end_slot + 1) - 3
 
-    return relations
+        # coordinates of the center of the arc
+        x = self.padding_left + start + 3
+        y = self.height - self.arc_base_height
+        xc = x + self.radius
+        yc = y - (20 * relation.distance)
+
+        # draws the arrow at the end word
+        if(relation.origin == relation.word_end):
+            self.context.move_to(xc - self.radius - arrow_length,
+                                y - arrow_length - self.bheight)
+            self.context.line_to(xc - self.radius, y - self.bheight)
+            self.context.line_to(xc - self.radius + arrow_length,
+                                y - arrow_length - self.bheight)
+            self.context.stroke()
+
+        # draws line from the starting word to its arc
+        self.context.move_to(x, y - self.bheight)
+        self.context.line_to(x, yc)
+        self.context.stroke()
+
+        # draws the arc of the starting word
+        angle1 = 3.14
+        angle2 = -1.57
+        self.context.arc(xc, yc, self.radius, angle1, angle2)
+
+        # puts the x coordinate in the center of the ending word
+        # note that there is NOT a context.stroke() between the drawing of the
+        # arcs, this is done on purpose so a line from the first arc is draw to
+        # the second arc
+        xc = end
+
+        # draws the arc of the ending word
+        angle1 = -1.57
+        angle2 = 0
+        self.context.arc(xc, yc, self.radius, angle1, angle2)
+        self.context.stroke()
+
+        # draws line from the second arc to the ending word
+        self.context.move_to(xc + self.radius, y - self.bheight)
+        self.context.line_to(xc + self.radius, yc)
+        self.context.stroke()
+
+        # draws the arrow at the end
+        if(relation.origin == relation.word_start):
+            self.context.move_to(xc + self.radius - arrow_length,
+                                y - arrow_length - self.bheight)
+            self.context.line_to(xc + self.radius, y - self.bheight)
+            self.context.line_to(xc + self.radius + arrow_length,
+                                y - arrow_length - self.bheight)
+            self.context.stroke()
+
+        # draws the annotation centered
+        self.context.set_font_size(self.font_annotation_size)
+        c = (x + self.radius) + ((xc - (x + self.radius)) / 2)
+        c = c - ((len(relation.annotation) / 2) * self.letter_width) + 3
+        self.context.move_to(c,  yc - 5)
+        self.context.show_text(relation.annotation.upper())
+        self.context.stroke()
+
+    def save_png(self, filename):
+        self.surface.write_to_png(filename)
+
+    def as_png(self):
+        self.surface.write_to_png(filename)
+
+    def get_relations(self):
+        """
+        Create a list of relations (arcs)
+        """
+        relations = [
+            Relation(token) for token in self.sentence.tokens
+            if token.deprel != "ROOT"
+        ]
+
+        # defines the distance of the arc, which influence the height of the arc,
+        # from smallest distance relation to highest
+        relations.sort(key=lambda r: r.distance)
+        for relation in relations:
+            distances = set()
+            # stores all word distances and counts the uniques
+            # this value plus one is the maximum height of the
+            # arc needed to represent the actual relation
+            for sub_relation in relations:
+                if relation != sub_relation:
+                    if sub_relation.word_start >= relation.word_start:
+                        if sub_relation.word_end <= relation.word_end:
+                            distances.add(sub_relation.distance)
+            relation.distance = len(distances) + 1
+        return relations
 
 
-# defines a named-tuple for the CONLL entries
-cols = 'id form lemma cpostag postag feats head deprel phead pdeprel'
-Tag = collections.namedtuple('Tag', cols)
+def main():
+    import signal, sys
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+    for sentence in read_input(sys.stdin):
+        graph = DependencyGraph(sentence)
+        graph.draw()
+        graph.save_png(sentence.id + "-new.png")
 
-
-def generate_tags(sentence):
-    """
-    Extracts the CONLL columns
-    """
-
-    tags = []
-
-    for entry in sentence:
-        tags.append(Tag(*entry))
-
-    return tags
 
 if __name__ == "__main__":
-
-    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
-    read_input()
+    main()
