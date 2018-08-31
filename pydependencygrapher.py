@@ -26,14 +26,11 @@ class Relation(object):
         self.distance = self.word_end - self.word_start
 
 
-Sentence = collections.namedtuple('Sentence', 'id raw tokens')
-
-
 def make_sentence(lines):
-    return Sentence(
-        id=lines[0].lstrip("#"),
-        raw=lines[1].lstrip("Sentence:"),
-        tokens=[Token(*line.split('\t')) for line in lines[2:]],
+    return (
+        lines[0].lstrip("#"), # sentence id
+        lines[1].lstrip("Sentence:"), # raw sentence
+        [Token(*line.split('\t')) for line in lines[2:]], # tokens
     )
 
 
@@ -417,10 +414,10 @@ class DependencyGraph(object):
 def main():
     import signal, sys
     signal.signal(signal.SIGPIPE, signal.SIG_DFL)
-    for sentence in read_input(sys.stdin):
-        graph = DependencyGraph(sentence)
+    for sentence_id, _, tokens in read_input(sys.stdin):
+        graph = DependencyGraph(tokens)
         graph.draw()
-        graph.save_png(sentence.id + ".png")
+        graph.save_png(sentence_id + ".png")
 
 
 if __name__ == "__main__":
