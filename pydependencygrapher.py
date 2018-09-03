@@ -9,6 +9,8 @@ __version__ = "1.0.0"
 
 import cairo
 import collections
+import base64
+from io import BytesIO
 
 
 # defines a named-tuple for the CONLL tokens
@@ -86,7 +88,7 @@ class DependencyGraph(object):
 
     def __init__(
                 self,
-                sentence, 
+                sentence,
                 show_tags=True,
                 word_spacing=6,
                 font_size=12,
@@ -126,7 +128,7 @@ class DependencyGraph(object):
         """
 
         ntokens = len(self.forms)
-        
+
         # number of total letters in sentence
         # this is used to count the space of each letter and thus
         # allowing to pin point where to start to draw an arc
@@ -384,6 +386,11 @@ class DependencyGraph(object):
 
     def as_png(self):
         self.surface.write_to_png(filename)
+
+    def save_buffer(self):
+        img_buff = BytesIO()
+        self.surface.write_to_png(img_buff)
+        return base64.b64encode(img_buff.getvalue()).decode()
 
     def get_relations(self):
         """
