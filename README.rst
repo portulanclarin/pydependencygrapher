@@ -6,10 +6,14 @@ Draws dependency graphs from a modified CONLL input
 Usage example
 -------------
 
+.. code::
+
     cat example.conll | ./pydependencygrapher.py
 
 Input example
 -------------
+
+.. code::
 
     #example
     Sentence: Foi Darwin ou foi a evolução?
