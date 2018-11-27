@@ -1,11 +1,15 @@
-# pydependencygrapher
+pydependencygrapher
+===================
+
 Draws dependency graphs from a modified CONLL input
 
-### Usage example:
+Usage example
+-------------
 
-    cat example.conll | ./pydependencygrapher.py 
+    cat example.conll | ./pydependencygrapher.py
 
-### Input example:
+Input example
+-------------
 
     #example
     Sentence: Foi Darwin ou foi a evolução?
@@ -18,9 +22,8 @@ Draws dependency graphs from a modified CONLL input
     7	?	?	PNT	PNT	_	1	PUNCT	_	_
 
 
-### Output:
+Output example
+--------------
 
-![dependency graph with tags](https://raw.githubusercontent.com/joaoantonioverdade/pydependencygrapher/master/example.png)
-
-
-
+.. image:: https://raw.githubusercontent.com/joaoantonioverdade/pydependencygrapher/master/example.png
+   :alt: dependency graph with tags
