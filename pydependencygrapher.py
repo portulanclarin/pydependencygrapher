@@ -18,6 +18,21 @@ Token = collections.namedtuple(
     'Token', 'id form lemma cpostag postag feats head deprel phead pdeprel'
 )
 
+
+ROOT = Token(
+    id="1",
+    form="-Root-",
+    lemma="",
+    cpostag="",
+    postag="",
+    feats="",
+    head="_",
+    deprel="_",
+    phead="_",
+    pdeprel="_"
+)
+
+
 class Relation(object):
     def __init__(self, token):
         self.origin = int(token.head)
@@ -98,11 +113,30 @@ class DependencyGraph(object):
                 bheight=10,
                 radius=15,
                 padding_left=10,
+                draw_root=True,
             ):
-        self.sentence = sentence
+        if draw_root:
+            self.sentence = [ROOT]
+            self.sentence.extend(
+                Token(
+                    int(t.id)+1,
+                    t.form,
+                    t.lemma,
+                    t.cpostag,
+                    t.postag,
+                    t.feats,
+                    int(t.head)+1 if t.head != '_' else t.head,
+                    t.deprel,
+                    int(t.phead)+1 if t.phead != '_' else t.phead,
+                    t.pdeprel,
+                )
+                for t in sentence
+            )
+        else:
+            self.sentence = sentence
         self.show_tags = show_tags
         self.word_spacing = word_spacing
-        self.forms = [token.form for token in sentence]
+        self.forms = [token.form for token in self.sentence]
         self.relations = self.get_relations()
         # the relation height is used to define the arc height,
         # an arc from two neighbor words just needs a 1 relation height
@@ -398,7 +432,7 @@ class DependencyGraph(object):
         """
         relations = [
             Relation(token) for token in self.sentence
-            if token.deprel != "ROOT"
+            if token.deprel != "_"
         ]
 
         # defines the distance of the arc, which influence the height of the arc,
