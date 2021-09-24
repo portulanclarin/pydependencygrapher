@@ -28,7 +28,7 @@ setup(
     version=get_version('pydependencygrapher.py'),
     description='Draws dependency graphs.',
     long_description=read('README.rst'),
-    url='https://nlx-code.di.fc.ul.pt/lx/pydependencygrapher',
+    url='https://github.com/joaoantonioverdade/pydependencygrapher',
     author='João Rodrigues',
     author_email='joao.rodrigues@di.fc.ul.pt',
     py_modules=['pydependencygrapher'],
