@@ -5,7 +5,7 @@ Author: João A. Rodrigues (joao.rodrigues@di.fc.ul.pt)
 Date: 8 April 2015
 """
 
-__version__ = "1.1.1"
+__version__ = "1.1.2"
 
 import cairo
 import collections
