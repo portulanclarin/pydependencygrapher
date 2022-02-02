@@ -114,6 +114,8 @@ class DependencyGraph(object):
                 radius=15,
                 padding_left=10,
                 draw_root=True,
+                show_feats=True,
+                preserve_case=False,
             ):
         if draw_root:
             self.sentence = [ROOT]
@@ -152,6 +154,8 @@ class DependencyGraph(object):
         self.radius = radius
         self.padding_left = padding_left
         self.surface = None
+        self.show_feats = show_feats
+        self.preserve_case = preserve_case
 
     def draw(self):
         """
@@ -180,7 +184,7 @@ class DependencyGraph(object):
 
         if self.show_tags:
             # adds height space to write the tags
-            self.tags_number = 3
+            self.tags_number = 3 if self.show_feats else 2
             self.tags_height = self.tags_number * 20
             self.height = self.height + self.tags_height
 
@@ -283,7 +287,12 @@ class DependencyGraph(object):
             for t in self.sentence:
                 # reset height of bottom tag
                 y = self.height - 10
-                for field in [t.feats, t.lemma, t.cpostag]:
+                if self.show_feats:
+                    fields = [t.feats, t.lemma, t.cpostag]
+                else:
+                    fields = [t.lemma, t.cpostag]
+
+                for field in fields:
 
                     # writes tag
                     self.context.move_to(x, y)
@@ -412,7 +421,10 @@ class DependencyGraph(object):
         c = (x + self.radius) + ((xc - (x + self.radius)) / 2)
         c = c - ((len(relation.annotation) / 2) * self.letter_width) + 3
         self.context.move_to(c,  yc - 5)
-        self.context.show_text(relation.annotation.upper())
+        if self.preserve_case:
+            self.context.show_text(relation.annotation)
+        else:
+            self.context.show_text(relation.annotation.upper())
         self.context.stroke()
 
     def save_png(self, filename):
